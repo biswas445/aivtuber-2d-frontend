@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.log
+# BotRix widget URL (session id) lives here — never commit it
+.env
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini

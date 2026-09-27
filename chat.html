@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; frame-src https:; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    />
+    <!-- frame-src is https: (not a pinned host): the widget origin comes
+      from BOTRIX_WIDGET_URL in the local trusted .env, and a meta CSP
+      cannot be derived at runtime — pinning one vendor's host made any
+      other configured widget a SILENTLY blank iframe. chat.js validates
+      the URL and surfaces an explicit status when it is unusable. -->
+    <title>Hikasha Chat</title>
+    <style>
+      :root {
+        --claude-surface: rgba(242, 239, 231, 0.92);
+        --claude-surface-soft: rgba(248, 246, 240, 0.75);
+        --claude-ink: #3d3929;
+        --claude-ink-soft: rgba(61, 57, 41, 0.62);
+        --claude-accent: #d97757;
+        --claude-accent-deep: #c15f3c;
+        --claude-border: rgba(61, 57, 41, 0.14);
+        --shadow-float: 0 14px 34px rgba(50, 44, 30, 0.18), 0 3px 8px rgba(50, 44, 30, 0.1);
+        --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+        --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+        font-family:
+          'Segoe UI Variable Text',
+          'Segoe UI',
+          system-ui,
+          -apple-system,
+          sans-serif;
+        user-select: none;
+      }
+      /* TRANSPARENT (glass) mode: the window body is FULLY clear — you see
+         straight through to the desktop/stream behind it. All text turns
+         WHITE with a soft dark text-shadow so it reads over any background. */
+      body:not(.opaque) {
+        background: transparent;
+      }
+      body:not(.opaque) #chat-panel {
+        background: rgba(20, 18, 12, 0.14);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        backdrop-filter: blur(5px) saturate(1.1);
+        box-shadow: none;
+      }
+      body:not(.opaque) #chat-header .title {
+        color: #ffffff;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+      }
+      body:not(.opaque) #chat-status {
+        color: rgba(255, 255, 255, 0.85);
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+      }
+      body:not(.opaque) .hbtn {
+        color: #ffffff;
+      }
+      body:not(.opaque) .hbtn:hover {
+        background: rgba(255, 255, 255, 0.14);
+        color: #ffffff;
+      }
+      body:not(.opaque) .hbtn.active {
+        background: var(--claude-accent);
+        color: #fff7f2;
+      }
+      /* OPAQUE mode: the window stays transparent; a rounded cream CARD
+         fills it (inset 0) so the panel corners are CURVED, matching the
+         glass mode's card shape. No square window edges visible. */
+      body.opaque {
+        background: transparent;
+      }
+      body.opaque #chat-panel {
+        inset: 0;
+        border-radius: 18px;
+        background: rgba(242, 239, 231, 0.97);
+        border: none;
+        backdrop-filter: none;
+        box-shadow: none;
+      }
+      /* the frame wrapper follows the card's rounding so the iframe
+         content clips to the curve */
+      body.opaque #chat-frame-wrap {
+        border-radius: 0 0 18px 18px;
+        overflow: hidden;
+      }
+      body.opaque #chat-header {
+        padding-top: 8px;
+      }
+
+      /* the floating panel card */
+      #chat-panel {
+        position: absolute;
+        inset: 10px;
+        display: flex;
+        flex-direction: column;
+        border-radius: 18px;
+        background: var(--claude-surface);
+        border: 1px solid var(--claude-border);
+        box-shadow: var(--shadow-float);
+        animation: panel-in 0.3s var(--ease-out);
+        overflow: hidden;
+      }
+      @keyframes panel-in {
+        from {
+          opacity: 0;
+          transform: scale(0.96);
+        }
+        to {
+          opacity: 1;
+          transform: scale(1);
+        }
+      }
+
+      /* header: drag handle + status + buttons */
+      #chat-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 12px 8px;
+        -webkit-app-region: drag;
+        cursor: default;
+        flex: none;
+      }
+      #chat-header .title {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        color: var(--claude-ink);
+        font-size: 13px;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      #chat-header .title .heart {
+        color: var(--claude-accent);
+        font-size: 12px;
+      }
+      /* viewer counts: one pill per platform behind the title, each with
+         its library icon + count; hidden until first data; hover shows
+         the platform name */
+      #viewer-counts {
+        display: none; /* shown once the first count arrives */
+        align-items: center;
+        gap: 6px;
+        white-space: nowrap;
+      }
+      #viewer-counts .vc {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--claude-ink-soft);
+        background: rgba(61, 57, 41, 0.08);
+        border-radius: 8px;
+        padding: 2px 7px;
+      }
+      #viewer-counts .vc svg {
+        width: 12px;
+        height: 12px;
+        display: block;
+      }
+      #viewer-counts .vc.live {
+        color: #7dbb6a;
+        background: rgba(125, 187, 106, 0.14);
+      }
+      body:not(.opaque) #viewer-counts .vc {
+        color: rgba(255, 255, 255, 0.9);
+        background: rgba(255, 255, 255, 0.12);
+      }
+      body:not(.opaque) #viewer-counts .vc.live {
+        color: #b5e6a6;
+        background: rgba(255, 255, 255, 0.16);
+      }
+      #chat-status {
+        flex: 1;
+        min-width: 0;
+        color: var(--claude-ink-soft);
+        font-size: 11px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        text-align: right;
+        -webkit-app-region: no-drag;
+      }
+      #chat-status .dot {
+        display: inline-block;
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        margin-right: 5px;
+        vertical-align: 1px;
+        background: #b0a892;
+        transition: background 0.3s ease;
+      }
+      #chat-status.live .dot {
+        background: #7dbb6a;
+        box-shadow: 0 0 6px rgba(125, 187, 106, 0.8);
+      }
+
+      .hbtn {
+        -webkit-app-region: no-drag;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        border: none;
+        border-radius: 9px;
+        background: transparent;
+        color: var(--claude-ink);
+        cursor: pointer;
+        transition:
+          background 0.18s ease,
+          transform 0.22s var(--spring),
+          box-shadow 0.22s ease;
+      }
+      .hbtn:hover {
+        background: rgba(61, 57, 41, 0.08);
+        color: var(--claude-accent-deep);
+        transform: translateY(-1px) scale(1.08);
+      }
+      .hbtn:active {
+        transform: scale(0.92);
+      }
+      .hbtn.active {
+        background: var(--claude-accent);
+        color: #fff7f2;
+        box-shadow: 0 3px 10px rgba(217, 119, 87, 0.35);
+      }
+      .hbtn svg {
+        width: 14px;
+        height: 14px;
+        stroke-width: 2.1;
+      }
+
+      /* THE MESSAGES: the official BotRix multistream widget page, embedded
+         (the exact page an OBS browser source loads). BotRix maintains all
+         platform connections — twitch, youtube AND kick — normalizes and
+         renders the messages itself. The page is transparent by design. */
+      #chat-frame-wrap {
+        flex: 1;
+        min-height: 0;
+        -webkit-app-region: no-drag;
+      }
+      #chat-frame {
+        width: 100%;
+        height: 100%;
+        border: none;
+        background: transparent;
+        display: block;
+      }
+    </style>
+  </head>
+  <body class="resizable">
+    <div id="chat-panel">
+      <div id="chat-header">
+        <div class="title"><span class="heart">&#9829;</span> Chat</div>
+        <span id="viewer-counts">
+          <span class="vc vc-twitch" title="twitch viewers"
+            ><svg viewBox="0 0 24 24" fill="currentColor">
+              <path
+                d="M4.3 3 3 6.2v13.2h4.6L10.3 22h2.4l2.7-2.6h4.2L22 15V3H4.3zm15.4 11.2-2.6 2.5h-4.2l-2.7 2.6v-2.6H7V4.8h12.7v9.4zM11 8.4h1.8v5H11V8.4zm4.7 0h1.8v5h-1.8v-5z"
+              /></svg
+            ><span class="n">0</span></span
+          >
+          <span class="vc vc-youtube" title="youtube viewers"
+            ><svg viewBox="0 0 24 24" fill="currentColor">
+              <path
+                d="M23 7.3c-.3-1-1-1.8-2-2C19.2 4.8 12 4.8 12 4.8s-7.2 0-9 .5c-1 .2-1.7 1-2 2C.5 9 .5 12 .5 12s0 3 .5 4.7c.3 1 1 1.8 2 2 1.8.5 9 .5 9 .5s7.2 0 9-.5c1-.2 1.7-1 2-2 .5-1.7.5-4.7.5-4.7s0-3-.5-4.7zM9.8 15.5v-7l6.2 3.5-6.2 3.5z"
+              /></svg
+            ><span class="n">0</span></span
+          >
+          <span class="vc vc-kick" title="kick viewers"
+            ><svg viewBox="0 0 24 24" fill="currentColor">
+              <path d="M5 3h4v4h2V5h2V3h6v4h-2v2h2v4h-2v2h2v6h-6v-2h-2v-2H9v2H5V3z" /></svg
+            ><span class="n">0</span></span
+          >
+        </span>
+        <span id="chat-status"><span class="dot"></span>connecting...</span>
+        <button
+          class="hbtn"
+          id="btn-transparent"
+          title="Transparent background"
+          aria-label="Toggle transparency"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <circle cx="12" cy="12" r="9" stroke-dasharray="4 3" />
+            <path d="M12 3v3M12 18v3M3 12h3M18 12h3" />
+          </svg>
+        </button>
+        <button
+          class="hbtn active"
+          id="btn-pin"
+          title="Pin on top of everything"
+          aria-label="Pin chat panel"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M12 17v5" />
+            <path
+              d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16h14v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z"
+            />
+          </svg>
+        </button>
+        <button class="hbtn" id="btn-close" title="Close chat panel" aria-label="Close chat panel">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M18 6 6 18M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      <div id="chat-frame-wrap">
+        <iframe id="chat-frame" title="Multistream chat" allowtransparency="true"></iframe>
+      </div>
+    </div>
+    <script type="module" src="/src/chat.js"></script>
+  </body>
+</html>

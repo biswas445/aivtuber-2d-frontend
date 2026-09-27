@@ -1,0 +1,6 @@
+# Never format vendored/build/generated artifacts.
+dist/
+node_modules/
+character_models/
+public/live2d/
+package-lock.json
